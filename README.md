@@ -18,7 +18,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-You can configure which headers to check and which peers to trust like this:
+You can configure which headers to check and which peers to trust.
 
 ```go
 privateLAN, _ := netip.ParsePrefix("10.0.0.0/8")
