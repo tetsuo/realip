@@ -1,0 +1,22 @@
+@startuml
+start
+:Request comes in;
+if (Is RemoteAddr in TrustedPeers?) then (no)
+  :Return RemoteAddr as client IP;
+  stop
+else (yes)
+  :Check headers (e.g. X-Forwarded-For, X-Real-IP);
+  :Parse header list (if present);
+  repeat
+    :Take next IP from right;
+    if (Is IP in TrustedProxies?) then (yes)
+      :Continue left;
+    else (no)
+      :Return this IP as client IP;
+      stop
+    endif
+  repeat while (IPs left)
+  :If all IPs are trusted, return RemoteAddr;
+  stop
+endif
+@enduml
