@@ -1,5 +1,5 @@
-// Package realip provides functions determine the client IP address by inspecting
-// HTTP request headers behind a proxy.
+// Package realip provides functions to validate proxy forwarding headers to determine
+// the client IP address or forward trusted header values.
 package realip
 
 import (
@@ -62,6 +62,46 @@ func (r *RealIP) FromRequest(req *http.Request) string {
 
 	// Fallback: even if headers failed, the peer IP is valid.
 	return peerIP.String()
+}
+
+// HeaderFromRequest validates the request's proxy chain and returns the header value
+// if all security checks pass. Unlike FromRequest, this returns the raw header value
+// rather than extracting an IP address, making it suitable for passing the header
+// downstream to other services.
+//
+// Returns an empty string if:
+// - No trusted peers are configured (secure default)
+// - The immediate peer is not trusted
+// - The configured headers are not present in the request
+func (r *RealIP) HeaderFromRequest(req *http.Request) string {
+	// Get the direct peer IP first.
+	peerIP := getPeerAddr(req)
+	if peerIP == noIP {
+		return ""
+	}
+
+	// If there aren't any trusted peers configured, assume the server is facing the public internet directly.
+	// Ignoring headers is the only secure default.
+	if len(r.trustedPeers) == 0 {
+		return ""
+	}
+
+	// Verify if the immediate peer is trusted to send headers.
+	if !ipInNets(peerIP, r.trustedPeers) {
+		// The request came from an untrusted source (e.g., directly from a user
+		// bypassing the load balancer). Ignore headers.
+		return ""
+	}
+
+	// The peer is trusted; return the first available header value.
+	for _, header := range r.headers {
+		headerValue := req.Header.Get(header)
+		if headerValue != "" {
+			return headerValue
+		}
+	}
+
+	return ""
 }
 
 func (r *RealIP) ipFromHeaders(req *http.Request) netip.Addr {

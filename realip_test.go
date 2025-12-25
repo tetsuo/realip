@@ -726,3 +726,185 @@ func BenchmarkFromRequest_WithTrustedPeers(b *testing.B) {
 		_ = rip.FromRequest(req)
 	}
 }
+
+func TestHeaderFromRequest(t *testing.T) {
+	privateLAN, _ := netip.ParsePrefix("10.0.0.0/8")
+
+	tests := []struct {
+		name       string
+		remoteAddr string
+		headers    map[string]string
+		opts       []realip.Option
+		want       string
+	}{
+		{
+			name:       "trusted peer returns X-Forwarded-For header",
+			remoteAddr: "10.0.0.1:54321",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.195, 70.41.3.18"},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "203.0.113.195, 70.41.3.18",
+		},
+		{
+			name:       "trusted peer returns X-Real-IP header",
+			remoteAddr: "10.0.0.1:54321",
+			headers:    map[string]string{"X-Real-IP": "198.51.100.178"},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XRealIP}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "198.51.100.178",
+		},
+		{
+			name:       "trusted peer with multiple headers, returns first configured",
+			remoteAddr: "10.0.0.1:54321",
+			headers: map[string]string{
+				"X-Forwarded-For": "203.0.113.195",
+				"X-Real-IP":       "198.51.100.178",
+			},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor, realip.XRealIP}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "203.0.113.195",
+		},
+		{
+			name:       "trusted peer with multiple headers, respects priority order",
+			remoteAddr: "10.0.0.1:54321",
+			headers: map[string]string{
+				"X-Forwarded-For": "203.0.113.195",
+				"X-Real-IP":       "198.51.100.178",
+			},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XRealIP, realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "198.51.100.178",
+		},
+		{
+			name:       "untrusted peer returns empty string",
+			remoteAddr: "8.8.8.8:54321",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.195"},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "",
+		},
+		{
+			name:       "no trusted peers configured returns empty string",
+			remoteAddr: "10.0.0.1:54321",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.195"},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+			},
+			want: "",
+		},
+		{
+			name:       "trusted peer but no headers present returns empty string",
+			remoteAddr: "10.0.0.1:54321",
+			headers:    map[string]string{},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "",
+		},
+		{
+			name:       "trusted peer but wrong header present returns empty string",
+			remoteAddr: "10.0.0.1:54321",
+			headers:    map[string]string{"X-Real-IP": "198.51.100.178"},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "",
+		},
+		{
+			name:       "trusted peer with empty header value returns empty string",
+			remoteAddr: "10.0.0.1:54321",
+			headers:    map[string]string{"X-Forwarded-For": ""},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "",
+		},
+		{
+			name:       "no remote address returns empty string",
+			remoteAddr: "",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.195"},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "",
+		},
+		{
+			name:       "returns header with spaces preserved",
+			remoteAddr: "10.0.0.1:54321",
+			headers:    map[string]string{"X-Forwarded-For": "  203.0.113.195  ,  70.41.3.18  "},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "  203.0.113.195  ,  70.41.3.18  ",
+		},
+		{
+			name:       "returns header even with invalid IPs",
+			remoteAddr: "10.0.0.1:54321",
+			headers:    map[string]string{"X-Forwarded-For": "invalid, 999.999.999.999"},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+			},
+			want: "invalid, 999.999.999.999",
+		},
+		{
+			name:       "IPv6 trusted peer returns header",
+			remoteAddr: "[2001:db8::1]:54321",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.195"},
+			opts: []realip.Option{
+				realip.WithHeaders([]string{realip.XForwardedFor}),
+				realip.WithTrustedPeers([]netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}),
+			},
+			want: "203.0.113.195",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rip := realip.New(tt.opts...)
+			req := httptest.NewRequest("GET", "http://example.com", nil)
+			req.RemoteAddr = tt.remoteAddr
+
+			for key, value := range tt.headers {
+				req.Header.Set(key, value)
+			}
+
+			got := rip.HeaderFromRequest(req)
+			if got != tt.want {
+				t.Errorf("HeaderFromRequest() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func BenchmarkHeaderFromRequest(b *testing.B) {
+	privateLAN, _ := netip.ParsePrefix("10.0.0.0/8")
+
+	rip := realip.New(
+		realip.WithHeaders([]string{realip.XForwardedFor}),
+		realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+	)
+
+	req := httptest.NewRequest("GET", "http://example.com", nil)
+	req.RemoteAddr = "10.0.0.1:54321"
+	req.Header.Set("X-Forwarded-For", "203.0.113.195, 70.41.3.18, 150.172.238.178")
+
+	for b.Loop() {
+		_ = rip.HeaderFromRequest(req)
+	}
+}

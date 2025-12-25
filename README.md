@@ -1,6 +1,6 @@
 # realip
 
-Determine the client IP address by inspecting HTTP request headers behind a proxy.
+Validate proxy forwarding headers (X-Forwarded-For, X-Real-IP, True-Client-IP) to determine the client IP address or forward trusted header values.
 
 ## How it works
 
@@ -27,6 +27,25 @@ var rip = realip.New(
     realip.WithHeaders([]string{realip.XForwardedFor, realip.XRealIP}),
     realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
 )
+```
+
+### Getting header values
+
+If you need to pass the validated header value downstream instead of extracting the IP, use `HeaderFromRequest()`:
+
+```go
+var rip = realip.New(
+    realip.WithHeaders([]string{realip.XForwardedFor, realip.XRealIP}),
+    realip.WithTrustedPeers([]netip.Prefix{privateLAN}),
+)
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    // Returns the raw header value if all security checks pass
+    headerValue := rip.HeaderFromRequest(r)
+    if headerValue != "" {
+        clientReq.Header.Set("X-Forwarded-For", headerValue)
+    }
+}
 ```
 
 ## Options
@@ -80,29 +99,3 @@ var rip = realip.New(
 ```
 
 With `X-Forwarded-For: 203.0.113.195, 70.41.3.18, 150.172.238.178`, this skips the last IP and returns `70.41.3.18`.
-
-## Examples
-
-### Single Proxy (nginx, HAProxy)
-
-```go
-proxyNetwork, _ := netip.ParsePrefix("10.0.0.0/24")
-
-var rip = realip.New(
-    realip.WithHeaders([]string{realip.XForwardedFor, realip.XRealIP}),
-    realip.WithTrustedPeers([]netip.Prefix{proxyNetwork}),
-)
-```
-
-### Cloudflare
-
-Cloudflare sends the real client IP in the `True-Client-IP` header.
-
-```go
-cloudflareRange, _ := netip.ParsePrefix("173.245.48.0/20")
-
-var rip = realip.New(
-    realip.WithHeaders([]string{realip.TrueClientIP, realip.XForwardedFor}),
-    realip.WithTrustedPeers([]netip.Prefix{cloudflareRange}),
-)
-```
